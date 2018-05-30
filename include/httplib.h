@@ -1,3 +1,5 @@
+#include <stdio.h>
+
 typedef struct {
     char cmd[64];
     char value[512];
@@ -5,16 +7,21 @@ typedef struct {
     char real_path[256];
     char type[64];
     char hostname[256];
+    char method[64];
+    char param[512];
     int code;
     int size;
+    int content_length;
+    int cgi;
 } http_info_type;
 
 typedef struct {
     int exist_file;
     int exist_dir;
-    int temporarily_move;
     int exist_tmp_file;
     int moved_permanently;
+    int temporarily_move;
+    int see_other;
 } file_check_flags;
 
 file_check_flags init_file_check_flag();
@@ -36,6 +43,7 @@ void send_303(int sock, http_info_type *info);
 void send_404(int sock);
 
 void send_file(int sock, char *filename);
-
+void send_php(int sock, http_info_type *info);
+FILE* get_php(http_info_type *info);
 void print_info(http_info_type *info);
 void print_flags(file_check_flags flags);

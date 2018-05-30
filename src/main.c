@@ -8,7 +8,8 @@
 #define READ 0
 #define WRITE 1
 
-int temporarily_move = 0;
+int temporarily_move;
+int see_other;
 
 void* thread_func(void *param) {
     int* psock;
@@ -46,8 +47,12 @@ int main(int argc, char **argv)
     int sock_client;
     struct sockaddr_in addr;
 
-    if(argc == 2) {
+    if(argc == 3) {
         temporarily_move = atoi(argv[1]);
+        see_other = atoi(argv[2]);
+    } else {
+        printf("usage: %s <temporarily_move> <see_other>\n", argv[0]);
+        return 0;
     }
 
     sock_listen = exp1_tcp_listen(12345);
