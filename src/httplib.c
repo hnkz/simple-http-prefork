@@ -41,7 +41,7 @@ int http_session(int sock) {
         }
 
         recv_size += size;
-        // printf("%s\n", buf);
+        printf("%s\n", buf);
         ret = parse_header(buf, recv_size, &info);
     }
 
@@ -52,6 +52,8 @@ int http_session(int sock) {
 
 int parse_header(char *buf, int size, http_info_type *info) {
     char status[1024];
+    memset(status, 0, sizeof(status));
+
     int i, j;
 
     enum state_type {
@@ -72,12 +74,7 @@ int parse_header(char *buf, int size, http_info_type *info) {
                         i += 2;
                         int k;
                         for(k = 0; k < info->content_length; k++) {
-                            if(buf[i] == '&') {
-                                info->param[k] = ' ';
-                            } else {
-                                info->param[k] = buf[i];
-                            }
-                            i += 1;
+                            info->param[k] = buf[i++];
                         }
                         info->param[k] = '\0';
                     }
@@ -124,6 +121,11 @@ void parse_status(char *status, http_info_type *pinfo) {
         SEARCH_END
     } state;
 
+    memset(cmd, 0, sizeof(cmd));
+    memset(value, 0, sizeof(value));
+    memset(pinfo->cmd, 0, sizeof(pinfo->cmd));
+    memset(pinfo->value, 0, sizeof(pinfo->value));
+
     state = SEARCH_CMD;
     j = 0;
     for (i = 0; i < strlen(status); i++) {
@@ -155,11 +157,33 @@ void parse_status(char *status, http_info_type *pinfo) {
     }
 
     strcpy(pinfo->cmd, cmd);
+    pinfo->cmd[strlen(pinfo->cmd)] = '\0';
     strcpy(pinfo->value, value);
+    pinfo->value[strlen(pinfo->value)] = '\0';
 }
 
 void check_info(http_info_type *info) {
     if(strcmp(info->cmd, CMD[GET]) == 0) {
+        
+        // get GET param
+        int i = 0;
+        char *param_index;
+        param_index = strchr(info->value, '?');
+        if(param_index != NULL) {
+            int len = strlen(param_index);
+            *param_index = '\0';
+            param_index += 1;
+            while(i < len) {
+                if(*param_index == '&') {
+                    info->param[i++] = ' ';
+                } else {
+                    info->param[i++] = *param_index;
+                }
+                param_index += 1;
+            }
+            info->param[i] = '\0';
+        }
+
         strncpy(info->path, info->value, sizeof(info->path));
         strncpy(info->method, "GET", sizeof(info->method));
         check_file(info);
@@ -272,6 +296,8 @@ void set_type(http_info_type *info) {
     pext = strstr(info->path, ".");
     if (pext != NULL && strcmp(pext, ".html") == 0) {
         strcpy(info->type, "text/html");
+    } else if (pext != NULL && strcmp(pext, ".js") == 0) {
+        strcpy(info->type, "application/javascript");
     } else if (pext != NULL && strcmp(pext, ".php") == 0) {
         strcpy(info->type, "text/html");
         info->cgi = 1;
@@ -310,39 +336,55 @@ void http_reply(int sock, http_info_type *info) {
 }
 
 void send_200(int sock, http_info_type *info) {
-    FILE *fp;
     char buf[16384];
-    int len;
+    int len = 0;
     int ret;
 
-    memset(buf, 0, sizeof(buf));
     if(info->cgi) {
-        fp = get_php(info);
-        ret = fread(buf, sizeof(char), 16384, fp);
-        while(ret > 0) {
-            len += ret; 
-            ret = fread(buf, sizeof(char), 16384, fp);
+        FILE *fp;
+
+        memset(buf, 0, sizeof(buf));
+        if(strcmp(info->method, "POST") == 0) {
+            fp = get_html_from_php_post(info);
+        } else {
+            fp = get_html_from_php_get(info);
         }
-        info->size = len;
+
+        ret = fread(buf, sizeof(char), 16384, fp);
+        len += ret;
+        while (ret > 0) {
+            ret = fread(buf, sizeof(char), 1460, fp);
+            len += ret;
+        }
         pclose(fp);
-    }
+        info->size = len;
 
-    memset(buf, 0, sizeof(buf));
-    len = sprintf(buf, "HTTP/1.0 200 OK\r\n");
-    len += sprintf(buf + len, "Content-Length: %d\r\n", info->size);
-    len += sprintf(buf + len, "Content-Type: %s\r\n", info->type);
-    len += sprintf(buf + len, "\r\n");
+        memset(buf, 0, sizeof(buf));
+        len = sprintf(buf, "HTTP/1.0 200 OK\r\n");
+        len += sprintf(buf + len, "Content-Length: %d\r\n", info->size);
+        len += sprintf(buf + len, "Content-Type: %s; charset=UTF-8\r\n", info->type);
+        len += sprintf(buf + len, "\r\n");
+        ret = send(sock, buf, len, 0);
+        if (ret < 0) {
+            shutdown(sock, SHUT_RDWR);
+            close(sock);
+            return;
+        }
 
-    ret = send(sock, buf, len, 0);
-    if (ret < 0) {
-        shutdown(sock, SHUT_RDWR);
-        close(sock);
-        return;
-    }
-
-    if(info->cgi) {
         send_php(sock, info);
     } else {
+        memset(buf, 0, sizeof(buf));
+        len = sprintf(buf, "HTTP/1.0 200 OK\r\n");
+        len += sprintf(buf + len, "Content-Length: %d\r\n", info->size);
+        len += sprintf(buf + len, "Content-Type: %s; charset=UTF-8\r\n", info->type);
+        len += sprintf(buf + len, "\r\n");
+
+        ret = send(sock, buf, len, 0);
+        if (ret < 0) {
+            shutdown(sock, SHUT_RDWR);
+            close(sock);
+            return;
+        }
         send_file(sock, info->real_path);
     }
 }
@@ -441,15 +483,20 @@ void send_file(int sock, char *filename) {
 
 void send_php(int sock, http_info_type *info) {
     char buf[16384];
-    int len;
+    int len = 0;
+    int ret;
     FILE *fp;
 
+    if(strcmp(info->method, "POST") == 0) {
+        fp = get_html_from_php_post(info);
+    } else {
+        fp = get_html_from_php_get(info);
+    }
+
     memset(buf, 0, sizeof(buf));
-    fp = get_php(info);
     len = fread(buf, sizeof(char), 16384, fp);
     while (len > 0) {
-        printf("%s", buf);
-        int ret = send(sock, buf, len, 0);
+        ret = send(sock, buf, len, 0);
         if (ret < 0) {
             perror("cannnot send");
             shutdown(sock, SHUT_RDWR);
@@ -462,17 +509,15 @@ void send_php(int sock, http_info_type *info) {
     pclose(fp);
 }
 
-FILE* get_php(http_info_type *info) {
+FILE* get_html_from_php_get(http_info_type *info) {
     FILE *fp;
     char path[256];
     char command[1024];
 
     getcwd(path, sizeof(path));
-    // snprintf(command, sizeof(command)-1,
-    //      "REDIRECT_STATUS=true;REQUEST_METHOD=POST;CONTENT_LENGTH=%d;SCRIPT_FILENAME=%s;export REDIRECT_STATUS;export REQUEST_METHOD;export CONTENT_LENGTH;export SCRIPT_FILENAME;php-cgi -q %s", info->content_length, info->real_path, info->param);
 
+    memset(command, 0, sizeof(command));
     snprintf(command, sizeof(command)-1, "php-cgi -q %s %s", info->real_path, info->param);
-
 
     fp = popen(command, "r");
     if(fp == NULL) {
@@ -482,21 +527,100 @@ FILE* get_php(http_info_type *info) {
     return fp;
 }
 
+FILE* get_html_from_php_post(http_info_type *info) {
+    FILE *fp;
+    char buf[256];
+    char path[256];
+    char command[1024];
+
+    getcwd(path, sizeof(path));
+
+    snprintf(command, sizeof(command)-1,
+        "REDIRECT_STATUS=true\n\
+         SCRIPT_FILENAME=./%s\n\
+         REQUEST_METHOD=POST\n\
+         GATEWAY_INTERFACE=CGI/1.1\n\
+         CONTENT_TYPE=application/x-www-form-urlencoded\n\
+         CONTENT_LENGTH=%d\n\
+         export REDIRECT_STATUS\n\
+         export SCRIPT_FILENAME\n\
+         export REQUEST_METHOD\n\
+         export GATEWAY_INTERFACE\n\
+         export CONTENT_TYPE\n\
+         export CONTENT_LENGTH\n\
+         echo \"%s\" | php-cgi -q", info->real_path, info->content_length, info->param);
+
+    fp = popen(command, "r");
+    if(fp == NULL) {
+        perror("cannot popen");
+        return NULL;
+    }
+    // remove header
+    fread(buf, sizeof(char), 42, fp);
+    return fp;
+}
+
 void print_info(http_info_type *info) {
-    printf("------------------------------------------------------\n");
-    printf("\tcmd: %s\n", info->cmd);
-    printf("\tvalue: %s\n", info->value);
-    printf("\tpath: %s\n", info->path);
-    printf("\treal_path: %s\n", info->real_path);
-    printf("\ttype: %s\n", info->type);
-    printf("\thostname: %s\n", info->hostname);
-    printf("\tmethod: %s\n", info->method);
-    printf("\tparam: %s\n", info->param);
-    printf("\tcode: %d\n", info->code);
-    printf("\tsize: %d\n", info->size);
-    printf("\tcontent-length: %d\n", info->content_length);
-    printf("\tcgi: %d\n", info->cgi);
-    printf("------------------------------------------------------\n\n");
+    char buf[32];
+    write(1, "------------------------------------------------------\n", 55);
+
+    write(1, "\tcmd: ", 6);
+    write(1, info->cmd, sizeof(info->cmd));
+    write(1, "\n", 1);
+
+    write(1, "\tvalue: ", 8);
+    write(1, info->value, sizeof(info->value));
+    write(1, "\n", 1);
+
+    write(1, "\tpath: ", 6);
+    write(1, info->path, sizeof(info->path));
+    write(1, "\n", 1);
+
+    write(1, "\treal_path: ", 12); 
+    write(1, info->real_path, sizeof(info->real_path));
+    write(1, "\n", 1);
+
+    write(1, "\ttype: ", 7);
+    write(1, info->type, sizeof(info->type));
+    write(1, "\n", 1);
+
+    write(1, "\thostname: ", 11);
+    write(1, info->hostname, sizeof(info->hostname));
+    write(1, "\n", 1);
+
+    write(1, "\tmethod: ", 9);
+    write(1, info->method, sizeof(info->method));
+    write(1, "\n", 1);
+
+    write(1, "\tparam: ", 8);
+    write(1, info->param, sizeof(info->param));
+    write(1, "\n", 1);
+
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "%d", info->code);
+    write(1, "\tcode: ", 6);
+    write(1, buf, sizeof(buf));
+    write(1, "\n", 1);
+
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "%d", info->size);
+    write(1, "\tsize: ", 7);
+    write(1, buf, sizeof(buf));
+    write(1, "\n", 1);
+
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "%d", info->content_length);
+    write(1, "\tcontent-length: ", 17);
+    write(1, buf, sizeof(buf));
+    write(1, "\n", 1);
+
+    memset(buf, 0, sizeof(buf));
+    sprintf(buf, "%d", info->content_length);
+    write(1, "\tcgi: ", 5); 
+    write(1, buf, sizeof(buf));
+    write(1, "\n", 1);
+
+    write(1, "------------------------------------------------------\n\n", 56);
 }
 
 void print_flags(file_check_flags flags) {

@@ -44,6 +44,8 @@ void send_404(int sock);
 
 void send_file(int sock, char *filename);
 void send_php(int sock, http_info_type *info);
-FILE* get_php(http_info_type *info);
+FILE* get_html_from_php_get(http_info_type *info);
+FILE* get_html_from_php_post(http_info_type *info);
+
 void print_info(http_info_type *info);
 void print_flags(file_check_flags flags);
