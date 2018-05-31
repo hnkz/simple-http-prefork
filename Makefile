@@ -1,7 +1,7 @@
 CC      = gcc
-CFLAGS  = -c -Wall -pedantic-errors -O0 -g3 -std=gnu11
+CFLAGS  = -c -Wall -pedantic-errors -O0 -g3 -std=gnu11 
 LDFLAGS = 
-LIBS    = -lpthread
+LIBS    = -lpthread -lcrypto
 INCLUDE = -I./include 
 SRC_DIR = ./src
 OBJ_DIR = ./build
