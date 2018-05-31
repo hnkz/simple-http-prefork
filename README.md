@@ -7,3 +7,4 @@ Cで実装した簡単なWebサーバ
 - GET
 - POST
 - CGI(PHP)
+- Websocket
