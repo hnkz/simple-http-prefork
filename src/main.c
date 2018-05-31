@@ -34,8 +34,6 @@ int main(int argc, char **argv)
     // websocket
     ws_pid = fork();
     if(ws_pid == 0) {
-        char ws_head[1024];
-
         ws_listen = exp1_tcp_listen(22222);
         while(1) {
             int ret;
@@ -58,19 +56,12 @@ int main(int argc, char **argv)
                 break;
             }
 
-            char *key = create_secret_key(buf);
-
-            memset(ws_head, 0, sizeof(ws_head));
-            snprintf(ws_head, sizeof(ws_head), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", key);
-            ret = send(ws_client, ws_head, strlen(ws_head), 0);
-            if(ret < 0) {
-                write(1, "cannnot send\n", 13);
+            // send response head
+            ret = send_response_head(ws_client, buf);
+            if(ret == -1) {
                 close(ws_listen);
                 close(ws_client);
-                break;
             }
-            free(key);
-            write(1, ws_head, sizeof(ws_head));
 
             while(1) {
                 memset(buf, 0, sizeof(buf));
@@ -84,21 +75,17 @@ int main(int argc, char **argv)
 
                 ws_frame *frame;
                 frame = (ws_frame *)buf;
-                // print_ws_frame(*frame);
 
                 char data[2048];
                 int pay_len;
+
                 memset(data, 0, sizeof(data));
                 pay_len = get_payload(*frame, data);
-
+                
                 ws_frame send_frame;
-                memset((void *)&send_frame, 0, sizeof(ws_frame));
-                send_frame.flags[0] = 0x81;
-                send_frame.flags[1] = 0x00 | pay_len;
-                memset(send_frame.mask_key, 0, 4);
-                memcpy(send_frame.payload, data, sizeof(data));
 
-                // print_ws_frame(send_frame);
+                // create ws_frame for text message
+                create_text_frame(&send_frame, data, pay_len);
 
                 // If mask flag set 1
                 if(send_frame.flags[1] & 0x80) {

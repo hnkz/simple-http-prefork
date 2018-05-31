@@ -91,3 +91,30 @@ void print_ws_frame(ws_frame frame) {
     write(1, payload, sizeof(payload));
     write(1, "\n\n", 2);
 }
+
+int send_response_head(int ws_client, char *buf) {
+    int ret;
+    char ws_head[1024];
+    char *key = create_secret_key(buf);
+    
+    memset(ws_head, 0, sizeof(ws_head));
+    snprintf(ws_head, sizeof(ws_head), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", key);
+    ret = send(ws_client, ws_head, strlen(ws_head), 0);
+    if(ret < 0) {
+        perror("cannot send");
+        return -1;
+    }
+    free(key);
+
+    write(1, ws_head, sizeof(ws_head));
+
+    return 0;
+}
+
+void create_text_frame(ws_frame *send_frame, char *data, int pay_len) {
+    memset((void *)send_frame, 0, sizeof(ws_frame));
+    send_frame->flags[0] = 0x81;
+    send_frame->flags[1] = 0x00 | pay_len;
+    memset(send_frame->mask_key, 0, 4);
+    memcpy(send_frame->payload, data, strlen(data));
+}
