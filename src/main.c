@@ -24,31 +24,6 @@ static int mod_table[] = {0, 2, 1};
 int temporarily_move;
 int see_other;
 
-typedef struct {
-    unsigned fin:1;
-    unsigned rsv1:1;
-    unsigned rsv2:1;
-    unsigned rsv3:1;
-    unsigned opcode:4;
-    // unsigned mask:1;
-    unsigned payload_len:7;
-    char mask_key[4];
-    char payload[2048];
-} ws_frame;
-
-typedef struct {
-    unsigned fin:1;
-    unsigned rsv2:1;
-    unsigned rsv3:1;
-    unsigned rsv1:1;
-    unsigned opcode:4;
-    unsigned mask:1;
-    unsigned payload_len:7;
-    char mask_key[4];
-    char payload[2048];
-} send_ws_frame;
-
-
 void* thread_func(void *param) {
     int* psock;
     int sock;
@@ -74,6 +49,7 @@ void create_thread(int sock) {
 
   pthread_create(&th, NULL, thread_func, psock);
 }
+
 
 char *base64_encode(const unsigned char *data, size_t input_length, size_t *output_length) {
     *output_length = 4 * ((input_length + 2) / 3);
@@ -101,22 +77,43 @@ char *base64_encode(const unsigned char *data, size_t input_length, size_t *outp
     return encoded_data;
 }
 
+typedef struct {
+    unsigned char flags[2];
+    unsigned char mask_key[4];
+    unsigned char payload[2048];
+} ws_frame;
+
 int get_payload(ws_frame frame, char *payload) {
     int i;
-    for(i = 0; i < frame.payload_len; i++) {
+    for(i = 0; i < (frame.flags[1] & 0x7f); i++) {
         payload[i] = frame.payload[i] ^ frame.mask_key[i % 4];
     }
 
-    return frame.payload_len;
+    return frame.flags[1] & 0x7f;
+}
+
+char *create_secret_key(char *buf) {
+    char magic[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    char key_magic[] = "Sec-WebSocket-Key: ";
+
+    char *secret_key = strstr(buf, key_magic);
+    secret_key += strlen(key_magic);
+    char *end = strchr(secret_key, '\r');
+    *end = '\0';
+
+    char hash_data[512];
+    memset(hash_data, 0, sizeof(hash_data));
+    sprintf(hash_data, "%s%s", secret_key, magic);
+
+    unsigned char hash[SHA_DIGEST_LENGTH];
+    SHA1((unsigned char *)hash_data, strlen(hash_data), hash);
+
+    size_t send_key_len;
+    return base64_encode(hash, sizeof(hash), &send_key_len);
 }
 
 void print_ws_frame(ws_frame frame) {
-    // char fin[2];
-    // char rsv1[2];
-    // char rsv2[2];
-    // char rsv3[2];
     char opcode[32];
-    // char mask[2];
     char payload_len[32];
     char mask_key[64];
     char payload[2048];
@@ -127,42 +124,42 @@ void print_ws_frame(ws_frame frame) {
     memset(payload, 0, sizeof(payload));
 
     write(1, "fin: ", 5);
-    if(frame.fin)
+    if(frame.flags[0] & 0x80)
         write(1, "1\n", 2);
     else
         write(1, "0\n", 2);
 
     write(1, "rsv1: ", 6);
-    if(frame.rsv1)
+    if(frame.flags[0] & 0x40)
         write(1, "1\n", 2);
     else
         write(1, "0\n", 2);
 
     write(1, "rsv2: ", 6);
-    if(frame.rsv2) 
+    if(frame.flags[0] & 0x20) 
         write(1, "1\n", 2);
     else
         write(1, "0\n", 2);
 
     write(1, "rsv3: ", 6);
-    if(frame.rsv3)
+    if(frame.flags[0] & 0x10)
         write(1, "1\n", 2);
     else
         write(1, "0\n", 2);
 
-    sprintf(opcode, "opcode: %u\n", frame.opcode);
+    sprintf(opcode, "opcode: %u\n", frame.flags[0] & 0x0f);
     write(1, opcode, sizeof(opcode));
 
-    // write(1, "mask: ", 6);
-    // if(frame.mask)
-    //     write(1, "1\n", 2);
-    // else
-    //     write(1, "0\n", 2);
+    write(1, "mask: ", 6);
+    if(frame.flags[1] & 0x80)
+        write(1, "1\n", 2);
+    else
+        write(1, "0\n", 2);
 
-    sprintf(payload_len, "payload_len: %d\n", frame.payload_len);
+    sprintf(payload_len, "payload_len: %d\n", frame.flags[1] & 0x7f);
     write(1, payload_len, sizeof(payload_len));
 
-    sprintf(mask_key, "mask_key: %u\n", frame.mask_key);
+    sprintf(mask_key, "mask_key: %x%x%x%x\n", frame.mask_key[0], frame.mask_key[1], frame.mask_key[2], frame.mask_key[3]);
     write(1, mask_key, sizeof(mask_key));
 
     get_payload(frame, payload);
@@ -170,87 +167,6 @@ void print_ws_frame(ws_frame frame) {
     write(1, "payload: ", 9);
     write(1, payload, sizeof(payload));
     write(1, "\n\n", 2);
-}
-
-void print_send_ws_frame(send_ws_frame frame) {
-    // char fin[2];
-    // char rsv1[2];
-    // char rsv2[2];
-    // char rsv3[2];
-    char opcode[32];
-    // char mask[2];
-    char payload_len[32];
-    char mask_key[64];
-    char payload[2048];
-
-    memset(opcode, 0, sizeof(opcode));
-    memset(payload_len, 0, sizeof(payload_len));
-    memset(mask_key, 0, sizeof(mask_key));
-    memset(payload, 0, sizeof(payload));
-
-    write(1, "fin: ", 5);
-    if(frame.fin)
-        write(1, "1\n", 2);
-    else
-        write(1, "0\n", 2);
-
-    write(1, "rsv1: ", 6);
-    if(frame.rsv1)
-        write(1, "1\n", 2);
-    else
-        write(1, "0\n", 2);
-
-    write(1, "rsv2: ", 6);
-    if(frame.rsv2) 
-        write(1, "1\n", 2);
-    else
-        write(1, "0\n", 2);
-
-    write(1, "rsv3: ", 6);
-    if(frame.rsv3)
-        write(1, "1\n", 2);
-    else
-        write(1, "0\n", 2);
-
-    sprintf(opcode, "opcode: %u\n", frame.opcode);
-    write(1, opcode, sizeof(opcode));
-
-    write(1, "mask: ", 6);
-    if(frame.mask)
-        write(1, "1\n", 2);
-    else
-        write(1, "0\n", 2);
-
-    sprintf(payload_len, "payload_len: %d\n", frame.payload_len);
-    write(1, payload_len, sizeof(payload_len));
-
-    sprintf(mask_key, "mask_key: %u\n", frame.mask_key);
-    write(1, mask_key, sizeof(mask_key));
-
-    // if(frame.mask)
-        // get_payload(frame, payload);
-    // else
-    memcpy(payload, frame.payload, sizeof(payload));
-
-    write(1, "payload: ", 9);
-    write(1, payload, sizeof(payload));
-    write(1, "\n\n", 2);
-}
-
-void h_to_n_for_send_ws_frame(send_ws_frame *frame) {
-    u_int16_t tmp1[1027];
-    u_int16_t tmp2[1027];
-
-    memset(tmp1, 0, sizeof(tmp1));
-    memset(tmp2, 0, sizeof(tmp2));
-    memcpy(tmp1, (char *)frame, sizeof(frame));
-
-    int i;
-    for(i = 0; i < 1027 / 2; i++) {
-        tmp2[i] = htons(tmp1[i]);
-    }
-
-    memcpy(frame, tmp2, sizeof(tmp2));
 }
 
 int main(int argc, char **argv)
@@ -277,8 +193,6 @@ int main(int argc, char **argv)
     ws_pid = fork();
     if(ws_pid == 0) {
         char ws_head[1024];
-        char magic[] = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-        char key_magic[] = "Sec-WebSocket-Key: ";
 
         ws_listen = exp1_tcp_listen(22222);
         while(1) {
@@ -302,25 +216,10 @@ int main(int argc, char **argv)
                 break;
             }
 
-            char *secret_key = strstr(buf, key_magic);
-            secret_key += strlen(key_magic);
-            char *end = strchr(secret_key, '\r');
-            *end = '\0';
-
-            char hash_data[512];
-            memset(hash_data, 0, sizeof(hash_data));
-            sprintf(hash_data, "%s%s", secret_key, magic);
-
-            unsigned char hash[SHA_DIGEST_LENGTH];
-            SHA1((unsigned char *)hash_data, strlen(hash_data), hash);
-
-            size_t send_key_len;
-            char *send_key = base64_encode(hash, sizeof(hash), &send_key_len);
-
-            // write(1, buf, sizeof(buf));
+            char *key = create_secret_key(buf);
 
             memset(ws_head, 0, sizeof(ws_head));
-            snprintf(ws_head, sizeof(ws_head), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", send_key);
+            snprintf(ws_head, sizeof(ws_head), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", key);
             ret = send(ws_client, ws_head, strlen(ws_head), 0);
             if(ret < 0) {
                 write(1, "cannnot send\n", 13);
@@ -328,8 +227,8 @@ int main(int argc, char **argv)
                 close(ws_client);
                 break;
             }
-            free(send_key);
-            // write(1, ws_head, sizeof(ws_head));
+            free(key);
+            write(1, ws_head, sizeof(ws_head));
 
             while(1) {
                 memset(buf, 0, sizeof(buf));
@@ -340,7 +239,6 @@ int main(int argc, char **argv)
                     close(ws_client);
                     break;
                 }
-                // write(1, buf, sizeof(buf));
 
                 ws_frame *frame;
                 frame = (ws_frame *)buf;
@@ -351,27 +249,35 @@ int main(int argc, char **argv)
                 memset(data, 0, sizeof(data));
                 pay_len = get_payload(*frame, data);
 
-                send_ws_frame send_frame;
-                memset((void *)&send_frame, 0, sizeof(send_ws_frame));
-                send_frame.fin = 1;
-                send_frame.rsv1 = 0;
-                send_frame.rsv2 = 0;
-                send_frame.rsv3 = 0;
-                send_frame.opcode = 8;
-                send_frame.mask = 0;
+                ws_frame send_frame;
+                memset((void *)&send_frame, 0, sizeof(ws_frame));
+                send_frame.flags[0] = 0x81;
+                send_frame.flags[1] = 0x00 | pay_len;
                 memset(send_frame.mask_key, 0, 4);
-                send_frame.payload_len = pay_len;
                 memcpy(send_frame.payload, data, sizeof(data));
 
-                print_send_ws_frame(send_frame);
+                print_ws_frame(send_frame);
 
-                // ret = send(ws_client, (void *)&send_frame, 57 + pay_len , 0);
-                ret = send(ws_client, (void *)&send_frame, sizeof(send_ws_frame) , 0);
-                if(ret < 0) {
-                    write(1, "cannnot send\n", 13);
-                    close(ws_listen);
-                    close(ws_client);
-                    break;
+                if(send_frame.flags[1] & 0x80) {
+
+                } else {
+                    // flags
+                    ret = send(ws_client, (void *)&send_frame.flags, sizeof(send_frame.flags) , 0);
+                    if(ret < 0) {
+                        write(1, "cannnot send\n", 13);
+                        close(ws_listen);
+                        close(ws_client);
+                        break;
+                    }
+
+                    // payload
+                    ret = send(ws_client, (void *)&send_frame.payload, send_frame.flags[1] & 0x7f , 0);
+                    if(ret < 0) {
+                        write(1, "cannnot send\n", 13);
+                        close(ws_listen);
+                        close(ws_client);
+                        break;
+                    }
                 }
             }
 
