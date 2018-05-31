@@ -341,36 +341,6 @@ void send_200(int sock, http_info_type *info) {
     int ret;
 
     if(info->cgi) {
-        FILE *fp;
-
-        memset(buf, 0, sizeof(buf));
-        if(strcmp(info->method, "POST") == 0) {
-            fp = get_html_from_php_post(info);
-        } else {
-            fp = get_html_from_php_get(info);
-        }
-
-        ret = fread(buf, sizeof(char), 16384, fp);
-        len += ret;
-        while (ret > 0) {
-            ret = fread(buf, sizeof(char), 1460, fp);
-            len += ret;
-        }
-        pclose(fp);
-        info->size = len;
-
-        memset(buf, 0, sizeof(buf));
-        len = sprintf(buf, "HTTP/1.0 200 OK\r\n");
-        len += sprintf(buf + len, "Content-Length: %d\r\n", info->size);
-        len += sprintf(buf + len, "Content-Type: %s; charset=UTF-8\r\n", info->type);
-        len += sprintf(buf + len, "\r\n");
-        ret = send(sock, buf, len, 0);
-        if (ret < 0) {
-            shutdown(sock, SHUT_RDWR);
-            close(sock);
-            return;
-        }
-
         send_php(sock, info);
     } else {
         memset(buf, 0, sizeof(buf));
@@ -482,81 +452,93 @@ void send_file(int sock, char *filename) {
 }
 
 void send_php(int sock, http_info_type *info) {
-    char buf[16384];
+    int buf_size = 16384;
+    char buf[buf_size];
+    char *text;
     int len = 0;
     int ret;
     FILE *fp;
 
-    if(strcmp(info->method, "POST") == 0) {
-        fp = get_html_from_php_post(info);
-    } else {
-        fp = get_html_from_php_get(info);
-    }
+    fp = get_html_from_php(info);
 
     memset(buf, 0, sizeof(buf));
-    len = fread(buf, sizeof(char), 16384, fp);
-    while (len > 0) {
-        ret = send(sock, buf, len, 0);
-        if (ret < 0) {
-            perror("cannnot send");
-            shutdown(sock, SHUT_RDWR);
-            close(sock);
-            break;
-        }
-        len = fread(buf, sizeof(char), 1460, fp);
+    ret = fread(buf, sizeof(char), buf_size, fp);
+    len = ret;
+
+    text = (char *)malloc(buf_size * 2);
+    if(text == NULL) {
+        perror("cannot malloc");
+        exit(-1);
     }
+
+    strcpy(text, buf);
+    memset(buf, 0, sizeof(buf));
+    ret = fread(buf, sizeof(char), buf_size, fp);
+    while(ret > 0) {
+        len += ret;
+        text = realloc(text, strlen(text) + strlen(buf) + 1);
+        strcat(text, buf);
+        memset(buf, 0, sizeof(buf));
+        ret = fread(buf, sizeof(char), buf_size, fp);
+    }
+
+    info->size = len;
+
+    // send header
+    memset(buf, 0, sizeof(buf));
+    len = sprintf(buf, "HTTP/1.0 200 OK\r\n");
+    len += sprintf(buf + len, "Content-Length: %d\r\n", info->size);
+    len += sprintf(buf + len, "Content-Type: %s; charset=UTF-8\r\n", info->type);
+    len += sprintf(buf + len, "\r\n");
+    ret = send(sock, buf, len, 0);
+    if (ret < 0) {
+        shutdown(sock, SHUT_RDWR);
+        close(sock);
+        return;
+    }
+
+    send(sock, text, info->size, 0);
 
     pclose(fp);
 }
 
-FILE* get_html_from_php_get(http_info_type *info) {
-    FILE *fp;
-    char path[256];
-    char command[1024];
-
-    getcwd(path, sizeof(path));
-
-    memset(command, 0, sizeof(command));
-    snprintf(command, sizeof(command)-1, "php-cgi -q %s %s", info->real_path, info->param);
-
-    fp = popen(command, "r");
-    if(fp == NULL) {
-        perror("cannot popen");
-        return NULL;
-    }
-    return fp;
-}
-
-FILE* get_html_from_php_post(http_info_type *info) {
+FILE* get_html_from_php(http_info_type *info) {
     FILE *fp;
     char buf[256];
-    char path[256];
     char command[1024];
 
-    getcwd(path, sizeof(path));
+    memset(command, 0, sizeof(command));
 
-    snprintf(command, sizeof(command)-1,
-        "REDIRECT_STATUS=true\n\
-         SCRIPT_FILENAME=./%s\n\
-         REQUEST_METHOD=POST\n\
-         GATEWAY_INTERFACE=CGI/1.1\n\
-         CONTENT_TYPE=application/x-www-form-urlencoded\n\
-         CONTENT_LENGTH=%d\n\
-         export REDIRECT_STATUS\n\
-         export SCRIPT_FILENAME\n\
-         export REQUEST_METHOD\n\
-         export GATEWAY_INTERFACE\n\
-         export CONTENT_TYPE\n\
-         export CONTENT_LENGTH\n\
-         echo \"%s\" | php-cgi -q", info->real_path, info->content_length, info->param);
+    if(strcmp(info->method, "POST") == 0) {
+        snprintf(command, sizeof(command)-1,
+            "REDIRECT_STATUS=true\n\
+            SCRIPT_FILENAME=./%s\n\
+            REQUEST_METHOD=POST\n\
+            GATEWAY_INTERFACE=CGI/1.1\n\
+            CONTENT_TYPE=application/x-www-form-urlencoded\n\
+            CONTENT_LENGTH=%d\n\
+            export REDIRECT_STATUS\n\
+            export SCRIPT_FILENAME\n\
+            export REQUEST_METHOD\n\
+            export GATEWAY_INTERFACE\n\
+            export CONTENT_TYPE\n\
+            export CONTENT_LENGTH\n\
+            echo \"%s\" | php-cgi -q", info->real_path, info->content_length, info->param);
+    } else {
+        snprintf(command, sizeof(command)-1, "php-cgi -q %s %s", info->real_path, info->param);
+    }
 
     fp = popen(command, "r");
     if(fp == NULL) {
         perror("cannot popen");
         return NULL;
     }
-    // remove header
-    fread(buf, sizeof(char), 42, fp);
+
+    if(strcmp(info->method, "POST") == 0) {
+        // remove header
+        fread(buf, sizeof(char), 42, fp);
+    }
+
     return fp;
 }
 
