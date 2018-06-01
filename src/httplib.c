@@ -41,7 +41,12 @@ int http_session(int sock) {
         }
 
         recv_size += size;
-        printf("%s\n", buf);
+        int i;
+        for(i = 1; i < sizeof(buf); i++) {
+            printf("0x%02x ", buf[i]);
+            if(i != 0 && i % 15 == 0)
+                printf("\n");
+        }
         ret = parse_header(buf, recv_size, &info);
     }
 
@@ -307,7 +312,7 @@ void set_type(http_info_type *info) {
 }
 
 void http_reply(int sock, http_info_type *info) {
-    print_info(info);
+    // print_info(info);
     switch(info->code) {
         case 200:
             send_200(sock, info);
