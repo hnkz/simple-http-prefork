@@ -1,5 +1,5 @@
 CC      = gcc
-CFLAGS  = -c -Wall -pedantic-errors -O0 -g3 -std=gnu11 
+CFLAGS  = -c -Wall -pedantic-errors -O0 -g3 -std=gnu11 -fno-stack-protector
 LDFLAGS = 
 LIBS    = -lpthread -lcrypto
 INCLUDE = -I./include 

@@ -39,17 +39,15 @@ int http_session(int sock) {
             write(1, "cannnot recv\n", 13);
             return -1;
         }
-
-        recv_size += size;
-
+        
         int i = 0;
         printf("-------------------------------------- start dump --------------------------------------\n0x%010x: ", i);
-        for(i = 1; i < sizeof(buf); i++) {
+        for(i = 1; i <= sizeof(buf); i++) {
             printf("0x%02x ", buf[i]);
             if(i != 0 && i % 15 == 0)
                 printf("\n0x%010x: ", i);
         }
-
+        recv_size += size;
         ret = parse_header(buf, recv_size, &info);
     }
 
