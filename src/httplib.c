@@ -41,12 +41,15 @@ int http_session(int sock) {
         }
 
         recv_size += size;
-        int i;
+
+        int i = 0;
+        printf("-------------------------------------- start dump --------------------------------------\n0x%010x: ", i);
         for(i = 1; i < sizeof(buf); i++) {
             printf("0x%02x ", buf[i]);
             if(i != 0 && i % 15 == 0)
-                printf("\n");
+                printf("\n0x%010x: ", i);
         }
+
         ret = parse_header(buf, recv_size, &info);
     }
 
