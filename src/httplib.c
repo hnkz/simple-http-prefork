@@ -40,13 +40,13 @@ int http_session(int sock) {
             return -1;
         }
         
-        int i = 0;
-        printf("-------------------------------------- start dump --------------------------------------\n0x%010x: ", i);
-        for(i = 1; i <= sizeof(buf); i++) {
-            printf("0x%02x ", buf[i]);
-            if(i != 0 && i % 15 == 0)
-                printf("\n0x%010x: ", i);
-        }
+        // int i = 0;
+        // printf("-------------------------------------- start dump --------------------------------------\n0x%010x: ", i);
+        // for(i = 1; i <= sizeof(buf); i++) {
+        //     printf("0x%02x ", buf[i]);
+        //     if(i != 0 && i % 15 == 0)
+        //         printf("\n0x%010x: ", i);
+        // }
         recv_size += size;
         ret = parse_header(buf, recv_size, &info);
     }
@@ -283,7 +283,7 @@ void check_file(http_info_type *info) {
     ) {
         info->code = 303;
         sprintf(info->real_path, "/tmp%s", info->path);
-    } 
+    }
     // 404
     else if(
         !flags.exist_file && !flags.exist_dir &&

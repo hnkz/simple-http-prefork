@@ -157,6 +157,8 @@ int main(int argc, char **argv) {
                     close(ws_listen);
                 }
 
+                write(1, buf, sizeof(buf));
+
                 // send response head
                 ret = send_response_head(sock, buf);
                 if(ret == -1) {
@@ -211,7 +213,6 @@ int main(int argc, char **argv) {
     }
 
     while(1) {
-        // sock_client = accept(sock_listen, (struct sockaddr *)&addr, (socklen_t *)&len);
         sock_client = accept(sock_listen, NULL, NULL);
 
         if(sock_client < 0) {

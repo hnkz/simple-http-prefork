@@ -98,7 +98,11 @@ int send_response_head(int ws_client, char *buf) {
     char *key = create_secret_key(buf);
     
     memset(ws_head, 0, sizeof(ws_head));
-    snprintf(ws_head, sizeof(ws_head), "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", key);
+    snprintf(ws_head, sizeof(ws_head), 
+        "HTTP/1.1 101 Switching Protocols\r\n\
+         Upgrade: websocket\r\n\
+         Connection: Upgrade\r\n\
+         Sec-WebSocket-Accept: %s\r\n\r\n", key);
     ret = send(ws_client, ws_head, strlen(ws_head), 0);
     if(ret < 0) {
         perror("cannot send");
